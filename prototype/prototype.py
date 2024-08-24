@@ -2,6 +2,7 @@ import socket
 import threading
 import time
 import subprocess
+import numpy as np
 from scapy.all import *
 from collections import defaultdict, deque
 import smtplib
@@ -42,23 +43,47 @@ def send_alert_email(subject, message):
     server.sendmail(EMAIL_USER, ALERT_EMAIL, msg.as_string())
     server.quit()
 
+def calculate_burstiness():
+    if len(TRAFFIC_VOLUME) < 2:
+        return 0
+    volume_changes = np.diff(TRAFFIC_VOLUME)
+    burstiness = np.std(volume_changes) / np.mean(volume_changes)
+    return burstiness
+
 def extract_features(packet):
+    src_ip = packet[IP].src if IP in packet else None
+    dst_ip = packet[IP].dst if IP in packet else None
+    src_port = packet.sport if TCP in packet else None
+    dst_port = packet.dport if TCP in packet else None
+    
     features = {
         'packet_length': len(packet),
-        'src_ip': packet[IP].src if IP in packet else None,
-        'dst_ip': packet[IP].dst if IP in packet else None,
+        'src_ip': src_ip,
+        'dst_ip': dst_ip,
         'protocol': packet.proto if IP in packet else None,
-        'src_port': packet.sport if TCP in packet else None,
-        'dst_port': packet.dport if TCP in packet else None,
+        'src_port': src_port,
+        'dst_port': dst_port,
         'payload_size': len(packet[Raw].load) if Raw in packet else 0,
-        'flags': packet[TCP].flags if TCP in packet else None
+        'flags': packet[TCP].flags if TCP in packet else None,
+        'request_rate': IP_REQUEST_COUNT.get(src_ip, 0),
+        'payload_size_variety': np.std([len(packet[Raw].load) for packet in sniff(count=100, filter="ip") if Raw in packet]),
+        'unique_ips': len(IP_REQUEST_COUNT),
+        'port_access_frequency': PORT_ACCESS_COUNT.get(dst_port, 0),
+        'session_frequency': SESSION_COUNT.get(src_ip, 0),
+        'connection_duration': np.mean(CONNECTION_DURATIONS.get(src_ip, [0])),
+        'traffic_volume': np.sum(TRAFFIC_VOLUME),
+        'burstiness': calculate_burstiness()
     }
+
     return features
 
 def detect_ddos(features):
-    # Example heuristic features for detecting DDoS attacks
-    # This is a basic example and can be expanded
-    if features.get('packet_length', 0) > 1000 or features.get('flags') == 'S':
+    # Example heuristic: large payload size, high request rate, high session frequency, long connection duration, or high burstiness
+    if (features.get('packet_length', 0) > 1000 or
+        features.get('request_rate', 0) > 100 or
+        features.get('session_frequency', 0) > 100 or
+        features.get('connection_duration', 0) > 600 or
+        features.get('burstiness', 0) > 1.5):
         return True
     return False
 
@@ -70,10 +95,18 @@ def process_packet(packet):
     src_ip = packet[IP].src if IP in packet else None
     if src_ip:
         IP_REQUEST_COUNT[src_ip] += 1
-    
-    if sum(IP_REQUEST_COUNT.values()) > ALERT_THRESHOLD:
-        send_alert_email("DDoS Alert", f"High request rate detected. Total requests: {sum(IP_REQUEST_COUNT.values())}")
-        print("Admin alerted via email.")
+        current_time = time.time()
+        
+        # Update session and connection duration
+        if src_ip in SESSION_START:
+            duration = current_time - SESSION_START[src_ip]
+            CONNECTION_DURATIONS[src_ip].append(duration)
+        else:
+            SESSION_START[src_ip] = current_time
+        
+        if sum(IP_REQUEST_COUNT.values()) > ALERT_THRESHOLD:
+            send_alert_email("DDoS Alert", f"High request rate detected. Total requests: {sum(IP_REQUEST_COUNT.values())}")
+            print("Admin alerted via email.")
     
     features = extract_features(packet)
     if detect_ddos(features):
