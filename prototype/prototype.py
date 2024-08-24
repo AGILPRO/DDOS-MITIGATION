@@ -1,19 +1,12 @@
 import socket
 import threading
 import time
-import pickle
-import numpy as np
-import pandas as pd
-from scapy.all import *
 import subprocess
+from scapy.all import *
 from collections import defaultdict, deque
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
-# Load the trained machine learning model
-with open('ddos_model.pkl', 'rb') as f:
-    model = pickle.load(f)
 
 BLOCKED_IPS = set()
 ATTACKED_PORTS = set()
@@ -57,60 +50,17 @@ def extract_features(packet):
         'protocol': packet.proto if IP in packet else None,
         'src_port': packet.sport if TCP in packet else None,
         'dst_port': packet.dport if TCP in packet else None,
-        'http_method': None,  # Placeholder for HTTP method
-        'http_host': None,    # Placeholder for HTTP host
-        'http_user_agent': None,  # Placeholder for HTTP User-Agent
-        'request_rate': 0,
-        'payload_size_variety': 0,
-        'unique_ips': len(IP_REQUEST_COUNT),
-        'port_access_frequency': PORT_ACCESS_COUNT.get(packet[TCP].dport if TCP in packet else None, 0),
-        'session_frequency': SESSION_COUNT.get(packet[IP].src if IP in packet else None, 0),
-        'connection_duration': np.mean(CONNECTION_DURATIONS.get(packet[IP].src if IP in packet else None, [0])),
-        'traffic_volume': np.sum(TRAFFIC_VOLUME),
-        'burstiness': calculate_burstiness()
+        'payload_size': len(packet[Raw].load) if Raw in packet else 0,
+        'flags': packet[TCP].flags if TCP in packet else None
     }
-
-    src_ip = packet[IP].src if IP in packet else None
-    if src_ip:
-        IP_REQUEST_COUNT[src_ip] += 1
-        current_time = time.time()
-        session_start = SESSION_START.get(src_ip, current_time)
-        if current_time - session_start > SESSION_TIMEOUT:
-            SESSION_COUNT[src_ip] = 0
-            SESSION_START[src_ip] = current_time
-        SESSION_COUNT[src_ip] += 1
-
-    if src_ip:
-        CONNECTION_DURATIONS[src_ip].append(time.time() - SESSION_START[src_ip])
-    
-    if TCP in packet and (packet[TCP].dport == 80 or packet[TCP].dport == 443):
-        if Raw in packet:
-            payload = packet[Raw].load.decode(errors='ignore')
-            if 'HTTP' in payload:
-                headers = payload.split('\r\n')
-                for header in headers:
-                    if header.startswith('GET ') or header.startswith('POST '):
-                        features['http_method'] = header.split(' ')[0]
-                    elif header.startswith('Host: '):
-                        features['http_host'] = header.split(' ')[1]
-                    elif header.startswith('User-Agent: '):
-                        features['http_user_agent'] = header.split(' ')[1]
-    
-    features['payload_size_variety'] = np.std([len(packet[Raw].load) for packet in sniff(count=100, filter="ip") if Raw in packet])
-
     return features
 
-def calculate_burstiness():
-    if len(TRAFFIC_VOLUME) < 2:
-        return 0
-    volume_changes = np.diff(TRAFFIC_VOLUME)
-    burstiness = np.std(volume_changes) / np.mean(volume_changes)
-    return burstiness
-
-def is_attack(features):
-    df = pd.DataFrame([features])
-    prediction = model.predict(df)
-    return prediction[0] == 1
+def detect_ddos(features):
+    # Example heuristic features for detecting DDoS attacks
+    # This is a basic example and can be expanded
+    if features.get('packet_length', 0) > 1000 or features.get('flags') == 'S':
+        return True
+    return False
 
 def monitor_traffic():
     print("Monitoring traffic...")
@@ -126,7 +76,7 @@ def process_packet(packet):
         print("Admin alerted via email.")
     
     features = extract_features(packet)
-    if is_attack(features):
+    if detect_ddos(features):
         print("DDoS attack detected!")
         attacked_port = identify_attacked_port(packet)
         mitigate_attack(packet, attacked_port)
