@@ -10,6 +10,9 @@ from collections import defaultdict, deque
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import dns.resolver
+import dns.update
+import dns.query
 
 # Load the trained machine learning model
 with open('ddos_model.pkl', 'rb') as f:
@@ -36,6 +39,18 @@ SMTP_PORT = 587
 EMAIL_USER = "your_email@example.com"  # Replace with your email
 EMAIL_PASS = "your_email_password"  # Replace with your email password
 
+# List of possible ports for port hopping
+PORT_POOL = [8080, 9090, 10000, 11000, 12000]
+
+# Current port number for the service
+current_port = random.choice(PORT_POOL)
+
+# DNS update configuration
+DNS_ZONE = "example.com."  # Your DNS zone
+DNS_SERVER = "8.8.8.8"  # Your DNS server
+DNS_NAME = "_service._tcp.example.com."  # DNS name for SRV record
+DNS_TTL = 60  # TTL for DNS record
+
 def send_alert_email(subject, message):
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
@@ -48,6 +63,24 @@ def send_alert_email(subject, message):
     server.login(EMAIL_USER, EMAIL_PASS)
     server.sendmail(EMAIL_USER, ALERT_EMAIL, msg.as_string())
     server.quit()
+
+def update_dns_port(new_port):
+    update = dns.update.Update(DNS_ZONE)
+    update.replace(DNS_NAME, DNS_TTL, 'SRV', 0, 5, new_port, 'service.example.com.')
+    response = dns.query.tcp(update, DNS_SERVER)
+    if response.rcode() == dns.rcode.NOERROR:
+        print(f"DNS updated successfully: {DNS_NAME} -> Port {new_port}")
+    else:
+        print(f"Failed to update DNS: {response.rcode()}")
+
+def change_port():
+    global current_port
+    new_port = random.choice([port for port in PORT_POOL if port != current_port])
+    print(f"Changing port from {current_port} to {new_port}")
+    subprocess.run(["sudo", "iptables", "-A", "INPUT", "-p", "tcp", "--dport", str(new_port), "-j", "ACCEPT"], check=True)
+    subprocess.run(["sudo", "iptables", "-A", "INPUT", "-p", "tcp", "--dport", str(current_port), "-j", "DROP"], check=True)
+    current_port = new_port
+    update_dns_port(current_port)
 
 def extract_features(packet):
     features = {
@@ -113,8 +146,8 @@ def is_attack(features):
     return prediction[0] == 1
 
 def monitor_traffic():
-    print("Monitoring traffic...")
-    sniff(filter="ip", prn=process_packet, store=0)
+    print("Monitoring traffic on port", current_port)
+    sniff(filter=f"tcp and port {current_port}", prn=process_packet, store=0)
 
 def process_packet(packet):
     src_ip = packet[IP].src if IP in packet else None
@@ -155,6 +188,7 @@ def mitigate_attack(packet, port):
         source_ip = packet[IP].src
         block_ip(source_ip)
     close_port(port)
+    change_port()
 
 def main():
     monitor_thread = threading.Thread(target=monitor_traffic)
