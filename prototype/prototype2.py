@@ -40,14 +40,14 @@ def extract_features(packet):
         dst_ip = packet[IP].dst if IP in packet else None
         src_port = packet[TCP].sport if TCP in packet else (packet[UDP].sport if UDP in packet else None)
         dst_port = packet[TCP].dport if TCP in packet else (packet[UDP].dport if UDP in packet else None)
-        
+
         # Calculate payload size if Raw layer exists
         payload_size = len(packet[Raw].load) if Raw in packet else 0
-        
+
         # Calculate payload size variety
         payload_sizes = [len(pkt[Raw].load) for pkt in scapy.sniff(count=100, filter="ip") if Raw in pkt]
         payload_size_variety = np.std(payload_sizes) if payload_sizes else 0
-        
+
         # Calculate features
         features = {
             'packet_length': len(packet),
@@ -87,11 +87,18 @@ def detect_ddos(features):
     print("No DDoS attack detected.")
     return False
 
+def get_local_ip():
+    hostname = socket.gethostname()
+    local_ip = socket.gethostbyname(hostname)
+    print(f"Local IP Address: {local_ip}")
+    return local_ip
+
 def monitor_traffic(interface=None):
     print("Monitoring traffic...")
+    local_ip = get_local_ip()
     try:
-        # Capture 100 packets first
-        packets = scapy.sniff(count=PACKET_CAPTURE_LIMIT, filter="ip", iface=interface)
+        # Capture packets with destination IP matching the local IP
+        packets = scapy.sniff(count=PACKET_CAPTURE_LIMIT, filter=f"ip dst {local_ip}", iface=interface)
         # Analyze the captured packets
         analyze_packets(packets)
     except Exception as e:
@@ -99,19 +106,19 @@ def monitor_traffic(interface=None):
 
 def analyze_packets(packets):
     ip_counts = defaultdict(int)
-    
+
     # Count the number of packets from each IP
     for packet in packets:
         if IP in packet:
             src_ip = packet[IP].src
             ip_counts[src_ip] += 1
-    
+
     # Check if any IP exceeds a normal range (e.g., more than 10 packets)
     for ip, count in ip_counts.items():
         if count > 10:
             print(f"IP {ip} has sent {count} packets. This might be suspicious.")
             IP_REQUEST_COUNT[ip] = count
-            
+
             # Process the last packet from this IP to extract features and check for DDoS
             last_packet = [pkt for pkt in packets if IP in pkt and pkt[IP].src == ip][-1]
             features = extract_features(last_packet)
@@ -142,7 +149,7 @@ def block_ip(ip):
         try:
             # First, try to delete any existing rule with the same name
             subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_name}"], check=False)
-            
+
             # Add the new rule to block the IP
             subprocess.run(["netsh", "advfirewall", "firewall", "add", "rule", f"name={rule_name}", "dir=in", "action=block", f"remoteip={ip}"], check=True)
             BLOCKED_IPS.add(ip)
